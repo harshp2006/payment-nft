@@ -1,0 +1,27 @@
+# Environment variables - NEVER commit these
+.env
+.env.local
+.env.*
+
+# Node modules - let Vercel install these fresh
+node_modules/
+frontend/node_modules/
+
+# Hardhat build artifacts
+artifacts/
+cache/
+
+# Coverage reports
+coverage/
+
+# Vite build output
+frontend/dist/
+dist/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
