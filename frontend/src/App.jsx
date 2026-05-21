@@ -46,8 +46,12 @@ const WHALE_COLORS = ['#B87333', '#EAE0C8', '#B9F2FF']
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const short = a => a ? `${a.slice(0, 6)}...${a.slice(-4)}` : ''
-const formatUSDC = v => ethers.formatUnits(v || 0, 6)
-const parseUSDC = v => ethers.parseUnits(v || '0', 6)
+const toUsdcUnits = amount => {
+  const parsed = parseFloat(amount || '0')
+  if (Number.isNaN(parsed)) return 0n
+  return BigInt(Math.round(parsed * 1_000_000))
+}
+const toUsdcDisplay = amountInUnits => (Number(amountInUnits || 0n) / 1_000_000).toFixed(2)
 
 function decodeTokenURI(uri) {
   try { return JSON.parse(atob(uri.split(',')[1])) } catch { return null }
@@ -336,7 +340,7 @@ function MerchantDashboard({ account, connect }) {
         </div>
         <div className="stats-row">
           <div className="stat-item"><label>Total Payments</label><div className="val">{info.payments}</div></div>
-          <div className="stat-item"><label>USDC Received</label><div className="val">{formatUSDC(info.usdc)}</div></div>
+          <div className="stat-item"><label>USDC Received</label><div className="val">{toUsdcDisplay(info.usdc)}</div></div>
         </div>
       </div>
 
@@ -431,7 +435,7 @@ function BuyerDashboard({ account, connect, preload, setBuyerPreload }) {
       ])
       setBuyerStats({
         count: Number(count),
-        spent: spent,
+        spent: Number(spent) / 1_000_000,
         loyalty: Number(lTier),
         whale: Number(wTier)
       })
@@ -458,8 +462,39 @@ function BuyerDashboard({ account, connect, preload, setBuyerPreload }) {
     checkAllowance()
   }, [amount, account, checkAllowance])
 
+  const handleApprove = async (amtUnits) => {
+    const signer = await getFreshSigner()
+    const usdc = new ethers.Contract(USDC_ADDRESS, USDC_ABI, signer)
+    const tx = await usdc.approve(CONTRACT_ADDRESS, amtUnits)
+    await tx.wait()
+    await checkAllowance()
+    setStatus(s => ({ ...s, step: 2, loading: false, error: '' }))
+  }
+
+  const handlePay = async (amtUnits) => {
+    const signer = await getFreshSigner()
+    const nft = new ethers.Contract(CONTRACT_ADDRESS, NFT_ABI, signer)
+    const tx = await nft.payMerchant(merchant, amtUnits)
+    const receipt = await tx.wait()
+
+    // Find Mint Transfer event
+    const transferLog = receipt.logs.find(l => 
+      l.address.toLowerCase() === CONTRACT_ADDRESS.toLowerCase() && 
+      l.topics[0] === ethers.id("Transfer(address,address,uint256)") &&
+      l.topics[1] === ethers.zeroPadValue(ethers.ZeroAddress, 32)
+    )
+
+    let uri = ''
+    if (transferLog) {
+      const tid = BigInt(transferLog.topics[3])
+      uri = await nft.tokenURI(tid)
+    }
+
+    return { receipt, uri, nft }
+  }
+
   const handlePayment = async () => {
-    const amtUnits = parseUSDC(amount)
+    const amtUnits = toUsdcUnits(amount)
     if (amtUnits < 100000n) {
       setStatus(s => ({ ...s, error: 'Min payment is 0.1 USDC' }))
       playErrorSound()
@@ -468,36 +503,15 @@ function BuyerDashboard({ account, connect, preload, setBuyerPreload }) {
     try {
       setStatus(s => ({ ...s, loading: true, error: '' }))
       await switchToArc()
-      const signer = await getFreshSigner()
-      
+
       // Step 1: Approve USDC
       if (allowance < amtUnits) {
-        const usdc = new ethers.Contract(USDC_ADDRESS, USDC_ABI, signer)
-        const tx = await usdc.approve(CONTRACT_ADDRESS, amtUnits)
-        await tx.wait()
-        await checkAllowance()
-        setStatus(s => ({ ...s, step: 2, loading: false, error: '' }))
+        await handleApprove(amtUnits)
         return
       }
 
       // Step 2: Pay & Mint
-      const nft = new ethers.Contract(CONTRACT_ADDRESS, NFT_ABI, signer)
-      const tx = await nft.payMerchant(merchant, amtUnits)
-      const receipt = await tx.wait()
-
-      // Find Mint Transfer event
-      const transferLog = receipt.logs.find(l => 
-        l.address.toLowerCase() === CONTRACT_ADDRESS.toLowerCase() && 
-        l.topics[0] === ethers.id("Transfer(address,address,uint256)") &&
-        l.topics[1] === ethers.zeroPadValue(ethers.ZeroAddress, 32)
-      )
-      
-      let uri = ''
-      if (transferLog) {
-        const tid = BigInt(transferLog.topics[3])
-        uri = await nft.tokenURI(tid)
-      }
-
+      const { receipt, uri, nft } = await handlePay(amtUnits)
       playMintSound()
       const oldLoyalty = buyerStats?.loyalty || 0
       const oldWhale = buyerStats?.whale || 0
@@ -511,7 +525,7 @@ function BuyerDashboard({ account, connect, preload, setBuyerPreload }) {
       ])
       const freshStats = {
         count: Number(count),
-        spent: spent,
+        spent: Number(spent) / 1_000_000,
         loyalty: Number(lTier),
         whale: Number(wTier)
       }
@@ -528,7 +542,8 @@ function BuyerDashboard({ account, connect, preload, setBuyerPreload }) {
       const entry = {
         mName: mInfo.name,
         mAddr: merchant,
-        amount: amount,
+        amount: toUsdcDisplay(amtUnits),
+        amountUnits: amtUnits.toString(),
         loyalty: freshStats.loyalty,
         whale: freshStats.whale,
         ts: Date.now(),
@@ -559,7 +574,7 @@ function BuyerDashboard({ account, connect, preload, setBuyerPreload }) {
 
   const getWhaleProgress = () => {
     if (!buyerStats) return { pct: 0, text: '0/25 USDC' }
-    const s = Number(formatUSDC(buyerStats.spent))
+    const s = Number(buyerStats.spent)
     if (s < 25) return { pct: (s / 25) * 100, text: `${s.toFixed(1)}/25 USDC (to Pearl)` }
     if (s < 100) return { pct: ((s - 25) / 75) * 100, text: `${s.toFixed(1)}/100 USDC (to Diamond)` }
     return { pct: 100, text: `${s.toFixed(1)} USDC spent (Diamond - Max)` }
@@ -622,11 +637,11 @@ function BuyerDashboard({ account, connect, preload, setBuyerPreload }) {
         {status.error && <div className="error-banner">{status.error}</div>}
 
         <div className="payment-flow">
-          <div className={`flow-step ${allowance >= parseUSDC(amount) ? 'done' : 'active'}`}>
-            <div className="step-num">{allowance >= parseUSDC(amount) ? '✓' : '1'}</div>
+          <div className={`flow-step ${allowance >= toUsdcUnits(amount) ? 'done' : 'active'}`}>
+            <div className="step-num">{allowance >= toUsdcUnits(amount) ? '✓' : '1'}</div>
             <div className="step-label">Approve USDC</div>
           </div>
-          <div className={`flow-step ${allowance >= parseUSDC(amount) ? 'active' : ''}`}>
+          <div className={`flow-step ${allowance >= toUsdcUnits(amount) ? 'active' : ''}`}>
             <div className="step-num">2</div>
             <div className="step-label">Pay & Mint</div>
           </div>
@@ -637,7 +652,7 @@ function BuyerDashboard({ account, connect, preload, setBuyerPreload }) {
           disabled={!mValid || status.loading}
           onClick={handlePayment}
         >
-          {status.loading ? 'Processing...' : allowance >= parseUSDC(amount) ? 'Pay & Mint NFT' : 'Approve USDC'}
+          {status.loading ? 'Processing...' : allowance >= toUsdcUnits(amount) ? 'Pay & Mint NFT' : 'Approve USDC'}
         </button>
       </div>
 
@@ -686,7 +701,7 @@ function BuyerDashboard({ account, connect, preload, setBuyerPreload }) {
             {history.slice(0, 5).map((h, i) => (
               <div key={i} className="hist-item">
                 <div className="hist-main">
-                  <div className="hist-name">{h.mName} <span className="hist-amt">{h.amount} USDC</span></div>
+                  <div className="hist-name">{h.mName} <span className="hist-amt">{h.amount ?? toUsdcDisplay(h.amountUnits)} USDC</span></div>
                   <div className="hist-time">{timeAgo(h.ts)}</div>
                 </div>
                 <div className="hist-tiers">
@@ -780,7 +795,7 @@ function MerchantProfile({ account, preload, setTab, setBuyerPreload }) {
               
               <div className="profile-stats">
                 <div className="p-stat"><strong>{info.payments}</strong> Payments</div>
-                <div className="p-stat"><strong>{formatUSDC(info.usdc)}</strong> USDC</div>
+                <div className="p-stat"><strong>{toUsdcDisplay(info.usdc)}</strong> USDC</div>
                 <div className="p-stat coll-badge" style={{ background: COLLECTIONS[info.collection].bg, color: COLLECTIONS[info.collection].accent, border: `1px solid ${COLLECTIONS[info.collection].accent}` }}>
                   Collection: {COLLECTIONS[info.collection].name}
                 </div>
@@ -844,7 +859,7 @@ function MyStats({ account, connect }) {
       <div className="stats-grid">
         <div className="stat-card card">
           <label>Total USDC Spent</label>
-          <div className="stat-val">{formatUSDC(stats.spent)}</div>
+          <div className="stat-val">{toUsdcDisplay(stats.spent)}</div>
         </div>
         <div className="stat-card card">
           <label>Unique Merchants</label>
@@ -912,7 +927,7 @@ function MyStats({ account, connect }) {
                     <div className="td-name">{h.mName}</div>
                     <div className="td-addr">{short(h.mAddr)}</div>
                   </td>
-                  <td className="td-amt">{h.amount} USDC</td>
+                  <td className="td-amt">{h.amount ?? toUsdcDisplay(h.amountUnits)} USDC</td>
                   <td>
                     <span className="t-badge" style={{ color: LOYALTY_COLORS[h.loyalty], border: `1px solid ${LOYALTY_COLORS[h.loyalty]}`, padding: '2px 6px', borderRadius: '10px', fontSize: '11px' }}>
                       {LOYALTY_TIERS[h.loyalty]}
