@@ -15,7 +15,7 @@ module.exports = {
     arc: {
       url: "https://5042002.rpc.thirdweb.com",
       chainId: 5042002,
-      accounts: [process.env.PRIVATE_KEY]
+            accounts: [process.env.PRIVATE_KEY]
     }
   }
 };

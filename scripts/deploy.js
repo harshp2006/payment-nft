@@ -1,48 +1,31 @@
 // scripts/deploy.js
-// Deploy PaymentNFT to Arc Testnet
-// Run: npx hardhat run scripts/deploy.js --network arc
-
 const { ethers } = require("hardhat");
 
-const USDC_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
-
 async function main() {
-  console.log("─".repeat(55));
-  console.log("  Deploying PaymentNFT to Arc Testnet");
-  console.log("─".repeat(55));
+  console.log("🚀 Starting Deployment of PaymentNFT V2...");
 
-  // Deployer info
   const [deployer] = await ethers.getSigners();
-  console.log(`\nDeployer  : ${deployer.address}`);
-
+  console.log(`Deployer: ${deployer.address}`);
+  
   const balance = await ethers.provider.getBalance(deployer.address);
-  console.log(`Balance   : ${ethers.formatEther(balance)} USDC (gas token)\n`);
+  console.log(`Balance: ${ethers.formatUnits(balance, 6)} USDC (Gas token)`);
 
-  // Deploy
-  console.log("Deploying PaymentNFT...");
   const PaymentNFT = await ethers.getContractFactory("PaymentNFT");
   const contract = await PaymentNFT.deploy();
 
-  // Wait for the deployment transaction to be mined
+  console.log("Waiting for deployment...");
   await contract.waitForDeployment();
 
-  const deployedAddress = await contract.getAddress();
-  const deployTx = contract.deploymentTransaction();
-
-  // ── Results ─────────────────────────────────────────────
-  console.log("\n" + "─".repeat(55));
-  console.log("  ✅  Deployment successful!");
-  console.log("─".repeat(55));
-  console.log(`  Contract address : ${deployedAddress}`);
-  console.log(`  Transaction hash : ${deployTx.hash}`);
-  console.log(`  USDC address     : ${USDC_ADDRESS}`);
-  console.log("─".repeat(55));
-  console.log("\n📋  REMINDER: Save the contract address above.");
-  console.log("    You will need it for the frontend / tests.\n");
+  const address = await contract.getAddress();
+  console.log("\n" + "=".repeat(40));
+  console.log(`✅ PaymentNFT V2 Deployed!`);
+  console.log(`Address: ${address}`);
+  console.log(`Explorer: https://testnet.arcscan.app/address/${address}`);
+  console.log(`\nUpdate CONTRACT_ADDRESS in frontend/src/App.jsx with: ${address}`);
+  console.log("=".repeat(40) + "\n");
 }
 
-main().catch((err) => {
-  console.error("\n❌  Deployment failed:");
-  console.error(err);
+main().catch((error) => {
+  console.error(error);
   process.exitCode = 1;
 });
