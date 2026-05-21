@@ -6,7 +6,7 @@ import { playMintSound, playTierUpgradeSound, playErrorSound } from './sounds'
 const ARC_CHAIN_ID = '0x4CEF52'
 const RPC = 'https://5042002.rpc.thirdweb.com'
 const ARC_EXPLORER = 'https://testnet.arcscan.app'
-const CONTRACT_ADDRESS = '0xAbc942e33C1f92B53A9Acc217c85f0edB913F165'
+const CONTRACT_ADDRESS = '0x231546a502754b33c574d3F311212c9bFEC0A9F1'
 const USDC_ADDRESS = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359'
 
 const NFT_ABI = [
